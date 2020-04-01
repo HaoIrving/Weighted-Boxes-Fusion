@@ -30,10 +30,10 @@ def get_ann(ann):
     YMin = []
     YMax = []
     for j in range(len(anns)):
-        id = preds[j]['image_id']
-        category_id = preds[j]['category_id']
+        id = anns[j]['image_id']
+        category_id = anns[j]['category_id']
         category = label_names[int(category_id)-1]
-        bbox = preds[j]['bbox']
+        bbox = anns[j]['bbox']
         x1 = bbox[0]
         y1 = bbox[1]
         x2 = bbox[2] + bbox[0] - 1
@@ -63,7 +63,74 @@ def save_in_file_fast(arr, file_name):
 def load_from_file_fast(file_name):
     return pickle.load(open(file_name, 'rb'))
 
+def compact_per_im(data_frame): ## data_frame == get_detections(...)
+    ann = data_frame
+    al_id = ann['ImageId'].values.tolist()
+    im_id = sorted(set(al_id),key=al_id.index)
+    al_l = ann.values.tolist()
+    string = []
+    for i in im_id:
+        row = []
+        c = 0
+        # print(1)
+        for j in al_l:
+            # print(len(al_l))
+            if j[0] == i:
+                al_l = al_l[1:]
+                # print(len(al_l))
+                s = [str(m) for m in j]
+                js = " ".join(s[1:])
+                print(j)
+                print(i)
+                row.append(js)
+            else:
+                print('skip')
+                break
+        rows = " ".join(row)
+        string.append(rows)
+    res = pd.DataFrame(im_id, columns=['ImageId'])
+    res['PredictionString'] = string
+    return res
 
+def get_detections_old(path): ## with PredictionString per im
+    preds = pd.read_csv(path)
+    ids = preds['ImageId'].values
+    preds_strings = preds['PredictionString'].values
+
+    ImageID = []
+    LabelName = []
+    Conf = []
+    XMin = []
+    XMax = []
+    YMin = []
+    YMax = []
+    for j in range(len(ids)):
+        # print('Go for {}'.format(ids[j]))
+        id = ids[j]
+        if str(preds_strings[j]) == 'nan':
+            continue
+        arr = preds_strings[j].strip().split(' ')
+        if len(arr) % 6 != 0:
+            print('Some problem here! {}'.format(id))
+            exit()
+        for i in range(0, len(arr), 6):
+            ImageID.append(id)
+            LabelName.append(arr[i])
+            Conf.append(float(arr[i + 1]))
+            XMin.append(float(arr[i + 2]))
+            XMax.append(float(arr[i + 4]))
+            YMin.append(float(arr[i + 3]))
+            YMax.append(float(arr[i + 5]))
+
+    res = pd.DataFrame(ImageID, columns=['ImageId'])
+    res['LabelName'] = LabelName
+    res['Conf'] = Conf
+    res['XMin'] = XMin
+    res['XMax'] = XMax
+    res['YMin'] = YMin
+    res['YMax'] = YMax
+
+    return res
 def get_detections(path):
     # preds = pd.read_csv(path)
     # ids = preds['ImageId'].values
@@ -254,8 +321,8 @@ def ensemble_predictions(pred_filenames, weights, params):
     ref_ids = None
     for j in range(len(pred_filenames)):
         #s = pd.read_csv(pred_filenames[j])
-        s = get_detections(pred_filenames[i])
-        s = compact_along_im(s)
+        s = get_detections(pred_filenames[j]) #df
+        s = compact_per_im(s) # df
         try:
             s.sort_values('ImageId', inplace=True)
         except:
@@ -361,14 +428,16 @@ if __name__ == '__main__':
     
     ann = read_json(annotations_path)
     ann = get_ann(ann)
+    print(ann)
     ann = ann[['ImageId', 'LabelName', 'XMin', 'XMax', 'YMin', 'YMax']].values
 
     # Find initial scores
     for i in range(len(pred_list)):
         det = get_detections(pred_list[i])
+        print(det)
         det = det[['ImageId', 'LabelName', 'Conf', 'XMin', 'XMax', 'YMin', 'YMax']].values
-        mean_ap, average_precisions = mean_average_precision_for_boxes(ann, det, verbose=False)
-        print("File: {} mAP: {:.6f}".format(os.path.basename(pred_list[i]), mean_ap))
+        #mean_ap, average_precisions = mean_average_precision_for_boxes(ann, det, verbose=False)
+        #print("File: {} mAP: {:.6f}".format(os.path.basename(pred_list[i]), mean_ap))
 
     ensemble_preds = ensemble_predictions(pred_list, weights, params)
     ensemble_preds.to_csv("ensemble.csv", index=False)
