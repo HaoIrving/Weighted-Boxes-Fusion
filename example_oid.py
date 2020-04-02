@@ -368,13 +368,13 @@ def ensemble_predictions(pred_filenames, weights, params):
     if verbose:
         print(all_ids.shape, all_boxes.shape, all_scores.shape, all_labels.shape)
 
-    res = pd.DataFrame(all_ids, columns=['ImageId'])
-    res['LabelName'] = all_labels
-    res['Conf'] = all_scores
-    res['XMin'] = all_boxes[:, 0]
-    res['XMax'] = all_boxes[:, 2]
-    res['YMin'] = all_boxes[:, 1]
-    res['YMax'] = all_boxes[:, 3]
+    res = pd.DataFrame(all_labels, columns=['name'])
+    res['image_id'] = all_ids
+    res['confidence'] = all_scores
+    res['xmin'] = all_boxes[:, 0]
+    res['ymin'] = all_boxes[:, 1]
+    res['xmax'] = all_boxes[:, 2]    
+    res['ymax'] = all_boxes[:, 3]
     if verbose:
         print('Run time: {:.2f}'.format(time.time() - start_time))
     return res
@@ -441,7 +441,7 @@ if __name__ == '__main__':
 
     ensemble_preds = ensemble_predictions(pred_list, weights, params)
     ensemble_preds.to_csv("ensemble.csv", index=False)
-    ensemble_preds = ensemble_preds[['ImageId', 'LabelName', 'Conf', 'XMin', 'XMax', 'YMin', 'YMax']].values
+    ensemble_preds = ensemble_preds[['name', 'image_id', 'confidence', 'xmin', 'ymin', 'xmax', 'ymax']].values
     mean_ap, average_precisions = mean_average_precision_for_boxes(ann, ensemble_preds, verbose=True)
     print("Ensemble [{}] Weights: {} Params: {} mAP: {:.6f}".format(len(weights), weights, params, mean_ap))
     
