@@ -180,7 +180,7 @@ def get_detections(path):
     return res
 
 
-def process_single_id(id, res, weights, params):
+def process_single_id(id, res, im_hw, weights, params):
     run_type = params['run_type']
     verbose = params['verbose']
 
@@ -294,6 +294,13 @@ def process_single_id(id, res, weights, params):
             merged_scores = merged_scores[:limit_boxes]
             merged_labels = merged_labels[:limit_boxes]
 
+    # 将坐标还原成实际值
+    for i in range(4):
+        if i == 0 or i == 2: # xmin, xmax
+            merged_boxes[:,i] = merged_boxes[:,i]*im_hw[id][1] 
+        else:
+            merged_boxes[:,i] = merged_boxes[:,i]*im_hw[id][0] # h
+    
     # Rename labels back
     merged_labels_string = []
     for m in merged_labels:
@@ -318,36 +325,45 @@ def ensemble_predictions(pred_filenames, weights, params):
         print('Use processes: {}'.format(procs_to_use))
 
     res = dict()
+    im_hw = dict()
     ref_ids = None
+    ref_hw = None
     for j in range(len(pred_filenames)):
-        #s = pd.read_csv(pred_filenames[j])
-        s = get_detections(pred_filenames[j]) #df
-        s = compact_per_im(s) # df
-        try:
-            s.sort_values('ImageId', inplace=True)
-        except:
-            s.sort_values('ImageID', inplace=True)
-        s.reset_index(drop=True, inplace=True)
-        try:
-            ids = s['ImageId'].values
-        except:
-            ids = s['ImageID'].values
-        preds = s['PredictionString'].values # np_array
+        s = pd.read_csv(pred_filenames[j])
+        
+        s.sort_values('image_id', inplace=True)# 按'imid'列排序，替换原值
+        s.reset_index(drop=True, inplace=True)#将索引重置为整型，并舍去
+        
+        ids = s['image_id'].values
         if ref_ids is None:
             ref_ids = tuple(ids)
         else:
             if ref_ids != tuple(ids):
                 print('Different IDs in ensembled CSVs!')
                 exit()
+                
+        hw = s[['im_h', 'im_w']].values
+        if ref_hw is None:
+            ref_hw = hw
+        else:
+            if (ref_hw != hw).any():
+                print('Different HWs in ensembled CSVs!')
+                exit()
+                
+        preds = s['PredictionString'].values # np_array
         for i in range(len(ids)):
             id = ids[i]
             if id not in res:
                 res[id] = []
+                im_hw[id] = []
             res[id].append(preds[i])
+            if j == 1:
+                im_hw[id].append(hw[i,0])
+                im_hw[id].append(hw[i,1])
 
     p = Pool(processes=procs_to_use)
     ids_to_use = sorted(list(res.keys()))
-    results = p.starmap(process_single_id, zip(ids_to_use, repeat(res), repeat(weights), repeat(params)))
+    results = p.starmap(process_single_id, zip(ids_to_use, repeat(res), repeat(im_hw), repeat(weights), repeat(params)))
 
     all_ids = []
     all_boxes = []
@@ -415,33 +431,39 @@ if __name__ == '__main__':
     
     # Files available here: https://github.com/ZFTurbo/Weighted-Boxes-Fusion/releases/download/v1.0/test_data.zip
     
-    ## json --> data --> csv
-    annotations_path = '/media/ubuntu/gqp/underwater_od/data/annotations_json/annotations_val.json' # 两者格式不同，分开处理
+#     annotations_path = '/media/ubuntu/gqp/underwater_od/data/annotations_json/annotations_val.json' # 两者格式不同，分开处理
     pred_list = [
-        '/home/gqp/centernet_underwater/CenterNet/exp/ctdet/coco_hg_140epoch/results.json',
-        '/home/gqp/centernet_underwater/CenterNet/exp/ctdet/coco_dla_140epoch/results.json',
+        '/home/gqp/centernet_underwater/CenterNet/exp/ctdet/coco_dla_140epoch_91/result_test-A_flip_multi_scale_coco_dla_140epoch_91.csv',
+        '/home/gqp/centernet_underwater/CenterNet/exp/ctdet/coco_hg_140epoch_91/result_test-A_flip_multi_scale_coco_hg_140epoch_91.csv',
     ]
     weights = [1, 1]
 
-    #ann = pd.read_csv(annotations_path)
-    #ann = ann[['ImageId', 'LabelName', 'XMin', 'XMax', 'YMin', 'YMax']].values
-    
-    ann = read_json(annotations_path)
-    ann = get_ann(ann)
-    print(ann)
-    ann = ann[['ImageId', 'LabelName', 'XMin', 'XMax', 'YMin', 'YMax']].values
-
-    # Find initial scores
-    for i in range(len(pred_list)):
-        det = get_detections(pred_list[i])
-        print(det)
-        det = det[['ImageId', 'LabelName', 'Conf', 'XMin', 'XMax', 'YMin', 'YMax']].values
-        #mean_ap, average_precisions = mean_average_precision_for_boxes(ann, det, verbose=False)
-        #print("File: {} mAP: {:.6f}".format(os.path.basename(pred_list[i]), mean_ap))
-
     ensemble_preds = ensemble_predictions(pred_list, weights, params)
-    ensemble_preds.to_csv("ensemble.csv", index=False)
-    ensemble_preds = ensemble_preds[['name', 'image_id', 'confidence', 'xmin', 'ymin', 'xmax', 'ymax']].values
-    mean_ap, average_precisions = mean_average_precision_for_boxes(ann, ensemble_preds, verbose=True)
-    print("Ensemble [{}] Weights: {} Params: {} mAP: {:.6f}".format(len(weights), weights, params, mean_ap))
+    ensemble_preds.to_csv("ensemble_91.csv", index=False)
+    for i in range(len(pred_list)):
+        print("File: {}".format(os.path.basename(pred_list[i])))
+    print("Ensemble [{}] Weights: {} Params: {}".format(len(weights), weights, params))
+
+#     ann = pd.read_csv(annotations_path)
+#     ann = ann[['ImageId', 'LabelName', 'XMin', 'XMax', 'YMin', 'YMax']].values
     
+#     ann = read_json(annotations_path)
+#     ann = get_ann(ann)
+#     print(ann)
+#     ann = ann[['ImageId', 'LabelName', 'XMin', 'XMax', 'YMin', 'YMax']].values
+
+   # Find initial scores
+#     for i in range(len(pred_list)):
+#         det = get_detections(pred_list[i])
+#         print(det)
+#         det = det[['ImageId', 'LabelName', 'Conf', 'XMin', 'XMax', 'YMin', 'YMax']].values
+#         mean_ap, average_precisions = mean_average_precision_for_boxes(ann, det, verbose=False)
+#         print("File: {} mAP: {:.6f}".format(os.path.basename(pred_list[i]), mean_ap))
+
+#     ensemble_preds = ensemble_predictions(pred_list, weights, params)
+#     ensemble_preds.to_csv("ensemble.csv", index=False)
+#     ensemble_preds = ensemble_preds[['name', 'image_id', 'confidence', 'xmin', 'ymin', 'xmax', 'ymax']].values
+#     mean_ap, average_precisions = mean_average_precision_for_boxes(ann, ensemble_preds, verbose=True)
+#     print("Ensemble [{}] Weights: {} Params: {} mAP: {:.6f}".format(len(weights), weights, params, mean_ap))
+    
+
